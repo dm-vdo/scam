@@ -1,0 +1,269 @@
+#!/bin/sh
+
+### This is part of SCAM, the System Configuration Abstraction Manager.
+### Note, there are some implementation notes enclosed as comments following
+### the usage() function.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+SCAM_CONFIG_DIR=/etc/scam
+
+    doing=""
+shelltype=""
+     opts=""
+    scope=""
+
+#############################################################################
+##
+## Define some utility functions
+##
+
+usage () {
+    cat <<EOF
+WARNING!! The config files used by this script MUST not contain multi-line
+continuations of ANY FORM. They WILL NOT WORK.
+
+Only one operational mode may be used per invocation. Currently,
+the only supported and documented modes of operation are:
+
+[variable-name] : display the value of the specified configuration variable.
+		  Only one variable name may be specified in this manner.
+
+--test var : return true/false to indicate the setting of DO-type
+             variable named 'var'
+
+--isfalse var : return true/false like --test, only logically inverted
+
+--list : output the names of the known configuration variables
+
+--dump [var1] [var2] [...]: output a series of shell commands which
+                 can be evaluated by the bourne-or-csh-compliant shell
+                 of your choice .
+
+Flags which may be used to modify the behavior of any of the above
+modes:
+
+--csh and --sh : indicate what sorts of shell commands to output when 
+		 performing a --dump
+
+--scope [something] : indicate the sub-instance scope which should override
+		global variable settings if the variables are set in that
+		sub-instance. (Yes, this is a wretched explanation. The
+		sub-instance value hides the global value.)
+EOF
+};
+
+## Implementation notes:
+#
+## This script works by evaluating the contents of all the
+## config files inside its config directory. These files should consist
+## primarily of a bunch of bourne-shell-syntax shell-variable definitions.
+#
+## This script does some magic with sed and eval to try to prepend all
+## the variable names with "ASCAM_" before setting them, so as to avoid
+## namespace clashes with important shell variables like "PATH", "IFS",
+## etc.... (If it fails to do this for any variables, this should be
+## regarded as a bug in this script, and the magic should be fixed to DTRT.)
+#
+## ** Thus, config files should contain lines like "FOO=bar",
+##  "SOMEPACKAGE_PREFIX=/opt/somepackage", etc.
+## 
+##   (These variables will then be set in the SCAM-internal
+##    shell-variable namespace as "ASCAM_FOO" and
+##    "ASCAM_SOMEPACKAGE_PREFIX".)
+##
+## ** However, users should be querying for these variables as simply "FOO"
+##  and "SOMEPACKAGE_PREFIX", and *not* as the "ASCAM_"-prefixed versions.
+##
+## Semi-historical comments:
+##
+## Note, also, you will find that the SCAM code currently supports config
+##  files containing definitions of the variables in their "ASCAM_FOO"
+##  forms, and that the user can query variables by their "ASCAM_FOO"
+##  names. (The original SCAM implementation worked this way.) However,
+##  this functionality is deprecated and will probably be disabled
+##  at some later time, if much more development is done on SCAM.
+
+read_vars () {
+    # Clean up the environment. We don't want to accidentally inherit any
+    # config information from the environment we were given.
+    for v in `list_vars`; do
+        unset $v
+    done
+
+    # And then read our config files.
+    for conf in ${SCAM_CONFIG_DIR}/*.conf; do
+	# The first sed here is for backwards-compatibility only.
+	# (scam config files should not define variables as ASCAM_FOO,
+	#  but rather simply FOO.)
+	eval `cat $conf | grep -v '^#' | tr '\t' ' ' \
+	      | sed -e 's/^ *ASCAM_\([A-Za-z0-9_]*=\)/\1/'  \
+	      | sed -e 's/^ *\([A-Za-z0-9_][A-Za-z0-9_]*=\)/ASCAM_\1/'`
+    done
+};
+
+
+list_vars () {
+    set | grep '^ASCAM_' | sed -e 's/^ASCAM_\([^=]*\)=.*$/\1/'
+};
+
+show_var () {
+    # This sed is here so our interface is backwards-compatibile with
+    # the old behavior.
+    # (scam should now be invoked with "scam FOO", not "scam ASCAM_FOO".)
+    varname=`echo "$1" | sed -e 's/^ASCAM_//'`
+
+    globalval=`eval "echo "'$ASCAM_'"$varname"`
+    if [ x"$scope" != x"" ]; then
+	scopedval=`eval "echo "'$ASCAM_'"${scope}_$varname"`
+	if [ x"$scopedval" != x"" ]; then
+	    echo $scopedval
+	else
+	    echo $globalval
+	fi
+    else
+    	echo $globalval
+    fi
+}
+
+affirmative_p () {
+    case `show_var $1` in
+	y|Y|yes|YES|t|T|true|TRUE)
+	    return 0 ;;
+	*)
+	    return 1 ;;
+    esac
+};
+
+##
+##
+#############################################################################
+
+while [ x"$1" != 'x' ]; do
+   case "$1" in
+	--test)
+	    doing="test"
+	    if [ "$2"x = ""x ]; then
+		echo "The $1 argument requires a parameter." 1>&2
+		usage 1>&2
+		exit 1
+	    fi
+	    varinquestion="$2"
+	    shift; shift
+	    ;;
+	--isfalse)
+	    doing="falsetest"
+	    if [ "$2"x = ""x ]; then
+		echo "The $1 argument requires a parameter." 1>&2
+		usage 1>&2
+		exit 1
+	    fi
+	    varinquestion="$2"
+	    shift; shift
+	    ;;
+	--list)
+	    doing="list"
+	    shift ;;
+	--dump)
+	    doing="dump"
+	    shift ;;
+	--csh)
+	    shelltype='csh'
+	    shift ;;
+	--sh)
+	    shelltype='sh'
+	    shift ;;
+	--scope)
+	    if [ "$2"x = ""x ]; then
+		echo "The $1 argument requires a parameter." 1>&2
+		usage 1>&2
+		exit 1
+	    fi
+	    scope="$2"
+	    shift; shift
+	    ;;
+	--help)
+	    usage
+	    exit 0 ;;
+        *)
+	    varlist="${varlist}${varlist+ }$1"
+	    varinquestion="$1"
+	    shift ;;
+   esac
+done
+
+
+if [ x"$doing" = x"" ]; then
+    if [ x"$varlist" != x"" ] && [ "$varlist" = "$varinquestion" ]; then
+	# they only gave one variable name
+	doing="show"
+    else
+        usage
+        exit 0;
+    fi
+fi
+
+### Try to autodetect the flavor of the parent shell, if they didn't tell us
+### what it was
+###
+if [ x"$shelltype" = x"" ]; then
+    if [ x"$SHELL" = x"" ]; then
+	shelltype="csh"
+    else
+	case `basename "$SHELL"` in
+	    *csh*)
+		shelltype="csh" ;;
+	    sh|ksh|bash*)
+		shelltype="sh" ;;
+	    *)
+		# Let's assume this is someone clueless.
+		# Let's also assume that clueless=csh. Not great, but a start.
+		shelltype="csh" ;;
+	esac
+    fi
+fi
+
+### Go get the data.
+read_vars
+
+case "$doing" in
+    dump)
+	if [ x"$varlist" != x"" ]; then
+	    vars="$varlist"
+	else
+	    vars=`list_vars`
+	fi
+	for var in $vars; do
+	    case "$shelltype" in
+		sh)
+		    eval 'echo "${var}='"'"`show_var "$var"`"';"'"'
+		    echo "export $var;" ;;
+		csh|*)
+		    eval 'echo "setenv ${var} '"'"`show_var "$var"`"'"'"'
+	    esac
+	done ;;
+    test)
+	if affirmative_p "$varinquestion"; then
+	    exit 0 # success
+	else
+	    exit 1 # failure
+	fi ;;
+    falsetest)
+	if affirmative_p "$varinquestion"; then
+	    exit 1 # failure
+	else
+	    exit 0 # success
+	fi ;;
+    show)
+	show_var "$varinquestion" ;;
+    list)
+	for var in `list_vars`; do
+	    echo "$var"
+	done ;;
+    *)
+	echo "Oops, this should not happen. (doing $doing)" 1>&2
+	exit 1 ;;
+esac
+
+exit 0
