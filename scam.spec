@@ -14,7 +14,8 @@ configuration by using key:value data in text files stored on the local
 machine.
 
 %prep
-%setup -q -n %{name}-%{version}
+#XXX: This should be fixed when we post publicly.
+%setup -q -n %{name}-master
 
 %install
 %{__install} -d $RPM_BUILD_ROOT/%{_sbindir}
