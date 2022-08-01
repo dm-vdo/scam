@@ -3,8 +3,8 @@ Version:        0.1
 Release:        1%{?dist}
 Summary:        System Configuration Abstraction Manager
 License:        GPL2
-URL:            https://gitlab.cee.redhat.com/vdo/open-sourcing/tools/third/scam
-Source0:        %{url}/-/archive/master/scam-master.tar.gz
+URL:            https://github.com/dm-vdo/scam
+Source0:        %{url}/archive/refs/heads/main.tar.gz
 BuildArch:      noarch
 
 
@@ -14,8 +14,7 @@ configuration by using key:value data in text files stored on the local
 machine.
 
 %prep
-#XXX: This should be fixed when we post publicly.
-%setup -q -n %{name}-master
+%setup -q -n %{name}-main
 
 %install
 %{__install} -d $RPM_BUILD_ROOT/%{_sbindir}
